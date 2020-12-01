@@ -1,0 +1,1503 @@
+---
+title: "Group 4 Project - LA crime"
+author: "Group 4"
+date: "November 22, 2020"
+output:
+  word_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+# NOTE: THIS CODE CONSISTS OF BOTH MAIN CODE ALONG WITH THE SHINY APP IN 3 PARTS
+# MAIN CODE - PART A (Crime only) | PART B (External Variables) | PART C (Shiny APP)
+
+# To run the code successfully add 'Monthly data','GDP_Jan2010_Aug2020',
+#'RentCPI_Jan2010_Aug2020','Temperature_Jan2010_Aug2020','Unemployment_Jan2010_Aug2020' excel files in the same folder of this # RMD file and select the go to the menu options and selesct 'Session' -> 'Set Working Directory' ->  'To source file location'. Then go to top right of this window and Under 'Run' select 'Run All' or use shortcult Cntrl+Alt+R.
+
+# The Shiny App gives a dashboard that shows the crime and external variable time series and MAPE 2020 results based on training till 2019. A user can also select a time range to focus on using the slider provided at the bottom left.
+
+# Introduction to the problem
+
+Lately, there has been a spike in the number of crime alert warnings that have been issued by USC DPS. Also, with the 2020 elections being around the corner, it has been noticed that the Republican party and President Trump's campaign has been using the "law and order" message to attack their political rival, claiming that cities and states governed by Democrats experience constant security threats. In addition, in the midst of COVID-19 pandemic and the national economic distress, as well as the recent nation-wide protests stimulated by police brutality towards African Americans, more cases of violent crimes have been reported in news than in ordinary times. However, politicians' campaign tactics and our personal perceptions of crime might be misleading and give a biased view. We want to use this final project opportunity to identify the trends present in crime occurrences. Therefore, we are planning to investigate Los Angeles crime data as a time series to help us understand the pattern of crime occurrences and its influencing factors.
+
+Objectives and Motivation
+1.	Understand the various components of LA crime time series data.
+2.	Understand the influencing factors of LA crime occurrences. 
+3.	Provide a one-step forward forecast of LA crime occurrences.
+
+Questions to Investigate
+1.	What is the trend of LA crime occurrences?
+2.	Is there any seasonality in LA crime occurrences?
+3.	How do economic factors influence LA crime occurrences?
+4.	How does population change influence LA crime occurrences? 
+5.	How does external variables like homelessness influence LA crime occurrences?
+6.	Does climate/weather influence crime occurrences?
+7.	How does COVID-19 pandemic influence LA crime occurrences?
+8.	What are some of the other possible factors?
+
+--- PART A
+
+####### FITTING MODELS ON CRIME DATA #######
+
+```{r}
+
+# Loading relevant packages
+library(forecast)
+library(ggplot2)
+library(zoo)   
+library(readxl)
+library(tseries)
+library(astsa)
+library(tree)
+library(cvTools)
+
+# Reading data
+crime <- read_excel("Monthly data.xlsx")
+
+head(crime)
+tail(crime)
+
+# Converting data to time series object
+crime.ts <- ts(crime$`Crime/Population`, start = c(2010,1), freq = 12) 
+
+# Basic plot
+par(mfrow = c(1,1))
+plot(crime.ts, xlab = "Time", ylab = "Monthly Crime", main = "LA Crimes (2010 to Aug 2020)")
+
+# Looking for trend and seasonality
+plot(decompose(crime.ts))
+
+# Looking for seasonality pattern
+seasonplot(crime.ts, col=rainbow(12), year.labels=TRUE)
+
+```
+
+There is a potential polynomial trend present in the data along with a strong annual seasonality. Based on the season plot it could be seen that summer months show higher crime rates compared to other months.
+
+```{r}
+
+# splitting data into train and test
+train.ts <- window(crime.ts,end = c(2018,12)) # Till 2018
+test.ts  <- window(crime.ts,start = c(2019,1),end = c(2019,12)) # 2019 year
+valid.ts <- window(crime.ts, start = c(2020,1)) # 2020 till August
+traintest.ts <- window(crime.ts,end = c(2019,12)) # Till 2019
+
+```
+
+*** BUILDING MODELS***
+
+# Model1 -  Fitting Linear Trend
+
+```{r}
+
+# Fitting linear trend
+lr_trend <- tslm(train.ts~trend)
+
+# Model performance
+summary(lr_trend)
+
+# Train, test and validation accuracy
+accuracy(lr_trend$fitted.values,train.ts) # train accuracy
+accuracy(forecast(lr_trend, h=12)$mean,test.ts) # test accuracy
+accuracy(forecast(lr_trend, h=24)$mean,valid.ts) # 2019 accuracy (train till 2018)
+accuracy(forecast(tslm(traintest.ts~trend), h=12)$mean,valid.ts) # 2019 accuracy (train till 2019)
+
+# Plotting the linear trend graph
+plot(crime.ts, xlab = "Time", ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s")+
+lines(lr_trend$fitted.values, col="red")+
+lines(forecast(lr_trend, h=12)$mean,col = "red",lty = 2)
+
+```
+
+Linear trend gives a poor fit with 0.19 R-squared. The plot shows that changing trend leads to over-prediction for the test period.
+
+# Model2 -  Fitting Quadratic trend
+
+```{r}
+
+# Fitting quadratic trend
+quad_trend <- tslm(train.ts ~ poly(trend, 2, raw=TRUE))
+
+# Model performance
+summary(quad_trend)
+
+# Train, test and validation accuracy
+accuracy(quad_trend$fitted.values,train.ts) # train accuracy
+accuracy(forecast(quad_trend, h=12)$mean,test.ts) # test accuracy
+accuracy(forecast(quad_trend, h=24)$mean,valid.ts) # 2020 accuracy (train till 2018)
+accuracy(forecast(tslm(traintest.ts~poly(trend, 2, raw=TRUE)), h=12)$mean,valid.ts) # 2020 accuracy (train till 2019)
+
+# Plotting the quadratic trend graph
+plot(traintest.ts, xlab = "Time", ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s")+
+lines(quad_trend$fitted.values, col="red")+
+lines(forecast(quad_trend, h=12)$mean,col = "red",lty = 2)
+
+```
+
+Quadratic model gives a better training accuracy than the linear trend however it performs weaker on the test set as there is a change in the direction which model is unable to predict. 
+
+# Model3 -  Fitting Cubic trend
+
+```{r}
+
+# Fitting cubic trend
+cubic_trend <- tslm(train.ts ~ poly(trend, 3, raw=TRUE))
+
+# Model performance
+summary(cubic_trend)
+
+# Train, test and validation accuracy
+accuracy(cubic_trend$fitted.values,train.ts) # train accuracy
+accuracy(forecast(cubic_trend, h=12)$mean,test.ts) # test accuracy
+accuracy(forecast(cubic_trend, h=24)$mean,valid.ts) # 2020 accuracy (train till 2018)
+accuracy(forecast(tslm(traintest.ts~poly(trend, 3, raw=TRUE)), h=12)$mean,valid.ts) # 2020 accuracy (train till 2019)
+
+# Plotting the cubic trend graph
+plot(traintest.ts, xlab = "Time", ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s")+
+lines(cubic_trend$fitted.values, col="red")+
+lines(forecast(cubic_trend, h=12)$mean,col = "red",lty = 2)
+
+```
+
+Cubic model gives a better training and test accuracy than the above model and captures the changing trend better. However, it is still over-predicting the values.
+
+# Model4 - Fitting cubic trend with season
+
+```{r}
+
+# Fitting cubic trend with season
+cubic_trend_season <- tslm(train.ts ~ poly(trend, 3, raw=TRUE) + season)
+
+# Model performance
+summary(cubic_trend_season)
+
+# Train, test and validation accuracy
+accuracy(cubic_trend_season$fitted.values,train.ts) # train accuracy
+accuracy(forecast(cubic_trend_season, h=12)$mean,test.ts) # test accuracy
+accuracy(forecast(cubic_trend_season, h=24)$mean,valid.ts) # 2020 accuracy (train till 2018)
+accuracy(forecast(tslm(traintest.ts~poly(trend, 3, raw=TRUE) + season), h=12)$mean,valid.ts) # 2020 accuracy (train till 2019)
+
+# Plotting the cubic trend with season graph
+plot(traintest.ts, xlab = "Time", ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s")+
+lines(cubic_trend_season$fitted.values, col="red")+
+lines(forecast(cubic_trend_season, h=12)$mean,col = "red",lty = 2)
+
+```
+
+Cubic trend with season is able to capture both the polynomial trend as well as season and gives a good performance overall.
+
+# Model5 - Naive and Seasonal Naive model
+
+```{r}
+
+# Fitting naive & seasonal naive model
+naivemod <- naive(train.ts, h=12)
+snaivemod <- snaive(train.ts,h=frequency(train.ts))
+
+# Model performance
+summary(naivemod)
+summary(snaivemod)
+
+# Train, test and validation accuracy
+
+# Naive
+accuracy(naivemod$mean,test.ts) # test accuracy
+accuracy(naive(train.ts, h=20)$mean,valid.ts) # 2020 accuracy (train till 2018)
+accuracy(naive(traintest.ts, h=8)$mean,valid.ts) # 2020 accuracy (train till 2019)
+
+# SNaive
+accuracy(snaivemod$mean,test.ts) # test accuracy
+accuracy(snaive(train.ts, h=20)$mean,valid.ts) # 2020 accuracy (train till 2018)
+accuracy(snaive(traintest.ts, h=8)$mean,valid.ts) # 2020 accuracy (train till 2019)
+
+# Plotting the Naive and SNaive graph
+autoplot(traintest.ts,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)") + 
+autolayer(naivemod,series = "Naive",PI = FALSE)+
+autolayer(snaivemod, series = "Seasonal Naive", PI = FALSE)+
+autolayer(test.ts, series = "observed")
+
+```
+
+Naive and SNaive models are over-predicting and performing weak.
+
+
+# Model6 - Trailing Moving Average
+
+```{r}
+
+# Using same forecast for all
+
+# Defining training and test length
+nValid = 12
+
+# Fitting moving average (choosing k = 12, to suppress seasonality) for train.ts and traintest.ts
+ma.trailing <- rollmean(train.ts,k =12,align = "right")
+ma.trailing.1 <- rollmean(traintest.ts,k =12,align = "right")
+
+# Store the last value
+last.ma = tail(ma.trailing,1)
+last.ma.1 = tail(ma.trailing.1,1)
+
+# Repeat the last value as predicted value for test period
+ma.trailing.pred = ts(rep(last.ma,nValid),start = c(2019,1), end = c(2019,nValid),frequency = 12)
+ma.trailing.pred.1 = ts(rep(last.ma.1,nValid),start = c(2020,1), end = c(2020,8),frequency = 12)
+
+# Train, test and validation accuracy
+accuracy(ma.trailing,train.ts) # train accuracy
+accuracy(ma.trailing.pred,test.ts) # test accuracy
+accuracy(ts(rep(last.ma,nValid+8),start = c(2019,1), end = c(2019,nValid+8),frequency = 12),valid.ts) # 2020 accuracy (train till 2018)
+accuracy(ma.trailing.pred.1,valid.ts) # 2020 accuracy (train till 2019)
+
+# Plotting the moving average graph
+autoplot(train.ts,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)")+
+autolayer(ma.trailing,series = "Moving Average")+
+autolayer(ma.trailing.pred,series = "Prediction")
+
+autoplot(traintest.ts,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)")+
+autolayer(ma.trailing.1,series = "Moving Average")+
+autolayer(ma.trailing.pred.1,series = "Prediction")
+
+
+
+# Rolling forward with 1 step
+nTrain = length(train.ts)
+nTrain.1 = length(traintest.ts)
+nValid.1 = 8
+
+# Create a one-step-ahead rolling forecast
+step = 1
+
+# Create an empty vector to store our prediction results
+ma.trailing.pred.r <- rep(NA,nValid)
+ma.trailing.pred.r.1 <- rep(NA,nValid.1)
+
+
+# Start the for loop for train.ts
+for (i in 1:nValid)
+{
+  
+  # Split the data into training and validation
+  nTrain = length(traintest.ts) -nValid + (i-1)
+  nTrain.1 = length(crime.ts) -nValid + (i-1)
+  train_ma.ts = window(crime.ts,start = c(2010,1),end=c(2010,nTrain))
+  
+  # Fit a trailing average smoother
+  ma.trailing.roll <- rollmean(train_ma.ts,k=12,align = "right")
+  
+  # Find the last moving average in the training period
+  last.ma = tail(ma.trailing.roll,1)
+  
+  # Use the last moving average as prediction for each month in the test period
+  ma.trailing.pred.r[i] = last.ma
+}
+
+# Start the for loop for traintest.ts
+for (i in 1:nValid.1)
+{
+  
+  # Split the data into training and validation
+  nTrain.1 = length(crime.ts) -nValid.1 + (i-1)
+  train_ma.1.ts = window(crime.ts,start = c(2010,1),end=c(2010,nTrain.1))
+  
+  # Fit a trailing average smoother
+  ma.trailing.roll.1 <- rollmean(train_ma.1.ts,k=12,align = "right")
+  
+  # Find the last moving average in the training period
+  last.ma.1 = tail(ma.trailing.roll.1,1)
+  
+  # Use the last moving average as prediction for each month in the test period
+  ma.trailing.pred.r.1[i] = last.ma.1
+}
+
+
+# Converting to time series
+ma.trailing.roll = ts(ma.trailing.roll,start =c(2010,12),end=c(2018,12),frequency = 12)
+ma.trailing.roll.1 = ts(ma.trailing.roll.1,start =c(2010,12),end=c(2019,12),frequency = 12)
+ma.trailing.pred.r = ts(ma.trailing.pred.r,start = c(2019,1),end = c(2019,12),frequency = 12)
+ma.trailing.pred.r.1 = ts(ma.trailing.pred.r.1,start = c(2020,1),end = c(2020,8),frequency = 12)
+
+# Train, test and validation accuracy
+accuracy(ma.trailing.roll,train.ts) # train accuracy
+accuracy(ma.trailing.pred.r,test.ts) # test accuracy
+accuracy(ma.trailing.pred.r.1,valid.ts) # 2020 accuracy (train till 2019)
+
+# Plotting the moving average graph
+autoplot(train.ts,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)")+
+autolayer(ma.trailing.roll,series = "Moving Average")+
+autolayer(ma.trailing.pred.r,series = "Prediction")
+
+autoplot(traintest.ts,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)")+
+autolayer(ma.trailing.roll.1,series = "Moving Average")+
+autolayer(ma.trailing.pred.r.1,series = "Prediction")
+
+```
+
+Moving average methods give good accuracy. Rolling forward with 1-step is more robust since both train and test values are closer. 
+
+# Model7 - Exponential Smoothing
+
+```{r}
+
+# Fitting exponential smoothing model
+modelopt <-  ets(train.ts,model = "ZZZ") 
+modelopt.1 <- ets(traintest.ts,model = "ZZZ") 
+
+# Model performance
+summary(modelopt) # AAdA
+summary(modelopt.1) # AAdA
+
+# Train, test and validation accuracy
+accuracy(modelopt$fitted, train.ts) # train accuracy
+accuracy(forecast(modelopt, h = length(test.ts))$mean,test.ts) # test accuracy
+accuracy(forecast(modelopt, h = length(test.ts)+length(valid.ts))$mean,valid.ts) # 2020 accuracy (train till 2018)
+accuracy(forecast(modelopt.1, h = length(valid.ts))$mean,valid.ts) # 2020 accuracy (train till 2019)
+
+# Plotting the exponential smoothing graph
+autoplot(train.ts,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)")+
+autolayer(modelopt$fitted)+
+autolayer(forecast(modelopt, h = length(test.ts))$mean,series = "AAdA")+
+autolayer(test.ts,series = "Observed")
+
+autoplot(traintest.ts,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)")+ 
+autolayer(modelopt.1$fitted)+
+autolayer(forecast(modelopt.1, h = length(valid.ts))$mean,series = "AAdA")+
+autolayer(valid.ts,series = "Observed")
+
+```
+
+The chosen optimal ets model is AAdA and it can be seen that test accuracy is much higher than that of training accuracy suggesting that this model is trying to overfit.
+
+# Model8 -  SARIMA (Box-Jenkins)
+
+```{r}
+
+# Fitting exponential smoothing model
+
+# differencing the time series to remove seasonality 
+ddtrain.ts <- diff(train.ts,lag = 12)
+
+# Acf and Pacf for train.ts
+par(mfrow = c(1,2))
+Acf(train.ts,lag.max = 150) 
+Pacf(train.ts,lag.max = 150) 
+
+# Acf and Pacf for ddtrain
+Acf(ddtrain.ts,lag.max = 150) 
+Pacf(ddtrain.ts,lag.max = 150) 
+par(mfrow = c(1,1))
+
+# Fitting best SARIMA Models for train.ts and traintest.ts
+modelsarima.1 <- Arima(train.ts, order = c(2,0,0),seasonal = list(order = c(0,0,1),period = 12))
+modelsarima.2 <- Arima(train.ts, order = c(2,0,1),seasonal = list(order = c(0,0,0),period = 12))
+modelsarima.3 <- Arima(train.ts, order = c(2,0,1),seasonal = list(order = c(0,0,1),period = 12))
+modelsarima.4 <- Arima(train.ts, order = c(1,0,1),seasonal = list(order = c(1,1,1),period = 12))
+
+modelsarima.1.1 <- Arima(traintest.ts, order = c(2,0,0),seasonal = list(order = c(0,0,1),period = 12))
+modelsarima.1.2 <- Arima(traintest.ts, order = c(2,0,1),seasonal = list(order = c(0,0,0),period = 12))
+modelsarima.1.3 <- Arima(traintest.ts, order = c(2,0,1),seasonal = list(order = c(0,0,1),period = 12))
+modelsarima.1.4 <- Arima(traintest.ts, order = c(1,0,1),seasonal = list(order = c(1,1,1),period = 12))
+
+
+# Model performance
+summary(modelsarima.1)
+summary(modelsarima.2)
+summary(modelsarima.3)
+summary(modelsarima.4)
+
+summary(modelsarima.1.1)
+summary(modelsarima.1.2)
+summary(modelsarima.1.3)
+summary(modelsarima.1.4)
+
+# Train, test and validation accuracy
+
+#(2,0,0)X(0,0,1)12 
+accuracy(modelsarima.1$fitted, train.ts) # train accuracy
+accuracy(forecast(modelsarima.1, h = length(test.ts))$mean,test.ts) # test accuracy
+accuracy(forecast(modelsarima.1, h = length(test.ts)+length(valid.ts))$mean,valid.ts) # 2020 accuracy (train till 2018)
+accuracy(forecast(modelsarima.1.1, h = length(valid.ts))$mean,valid.ts) # 2020 accuracy (train till 2019)
+
+#(2,0,1)X(0,0,0)12
+accuracy(modelsarima.2$fitted, train.ts) # train accuracy
+accuracy(forecast(modelsarima.2, h = length(test.ts))$mean,test.ts) # test accuracy
+accuracy(forecast(modelsarima.2, h = length(test.ts)+length(valid.ts))$mean,valid.ts) # 2020 accuracy (train till 2018)
+accuracy(forecast(modelsarima.1.2, h = length(valid.ts))$mean,valid.ts) # 2020 accuracy (train till 2019)
+
+#(2,0,1)X(0,0,1)12
+accuracy(modelsarima.3$fitted, train.ts) # train accuracy
+accuracy(forecast(modelsarima.3, h = length(test.ts))$mean,test.ts) # test accuracy
+accuracy(forecast(modelsarima.3, h = length(test.ts)+length(valid.ts))$mean,valid.ts) # 2020 accuracy (train till 2018)
+accuracy(forecast(modelsarima.1.3, h = length(valid.ts))$mean,valid.ts) # 2020 accuracy (train till 2019)
+
+#(1,0,1)X(1,1,1)12
+accuracy(modelsarima.4$fitted, train.ts) # train accuracy
+accuracy(forecast(modelsarima.4, h = length(test.ts))$mean,test.ts) # test accuracy
+accuracy(forecast(modelsarima.4, h = length(test.ts)+length(valid.ts))$mean,valid.ts) # 2020 accuracy (train till 2018)
+accuracy(forecast(modelsarima.1.4, h = length(valid.ts))$mean,valid.ts) # 2020 accuracy (train till 2019)
+
+# Plotting the SARIMA model graph for (2,0,0)X(0,0,1)12 (best results among 4)
+autoplot(train.ts,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)")+
+autolayer(modelsarima.1$fitted)+
+autolayer(forecast(modelsarima.1, h = length(test.ts))$mean,series = "Prediction")+
+autolayer(test.ts,series = "Observed")
+
+autoplot(traintest.ts,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)")+
+autolayer(modelsarima.1.1$fitted)+
+autolayer(forecast(modelsarima.1.1, h = length(valid.ts))$mean,series = "Prediction")+
+autolayer(valid.ts,series = "Observed")
+
+# Checking for model assumptions
+residuals <- modelsarima.1$residuals 
+
+checkresiduals(modelsarima.1) # can directly add model
+
+# Normality & Spread Check
+qqnorm(residuals)
+qqline(residuals)
+
+# Autocorrelation check (Independence)
+par(mfrow = c(1,2))
+Acf(residuals,lag.max = 150)
+Pacf(residuals,lag.max = 150)
+par(mfrow = c(1,1))
+
+```
+
+Based on the ACF and PACF plot and accuracy (2,0,0)X(0,0,1) model has been identified as the best model. The accuracy is fairly decent however the residuals show that some seasonality is present. Even after removing that in model 4 the peformance is poor. Thus, this method is not suitable for prediction with this data.
+
+---PART B
+
+####### ADDING EXTERNAL DATA #######
+
+```{r}
+
+# Reading external data for same time duration from Jan 2010 to Aug 2020
+gdp=read_excel('GDP_Jan2010_Aug2020.xlsx')
+ur=read_excel('Unemployment_Jan2010_Aug2020.xlsx')
+rent=read_excel('RentCPI_Jan2010_Aug2020.xlsx')
+temp=read_excel('Temperature_Jan2010_Aug2020.xlsx')
+
+# Converting to time series
+gdp.ts=ts(gdp$`GDP (Trillion Dollars)`, start=c(2010,1), frequency=12)
+ur.ts=ts(ur$`Unemployment Rate`, start=c(2010,1), frequency=12)
+rent.ts=ts(rent$RentCPI, start=c(2010,1), frequency=12)
+temp.ts=ts(temp$`AVG Temp (Fahrenheit)`, start=c(2010,1), frequency=12)
+
+# Plotting the data
+par(mfrow = c(2,2))
+
+#gdp
+plot(gdp.ts, xlab = "Time", ylab = "Monthly GDP", main = "LA GDP", cex.lab = 2, cex.axis=2, cex.main=1.5)
+
+#ur
+plot(ur.ts, xlab = "Time", ylab = "Monthly Unemployment Rate", main = "LA Unemployment Rate ", cex.lab = 2, cex.axis=2, cex.main=1.5)
+
+#temp
+plot(temp.ts, xlab = "Time", ylab = "Monthly Average Temperature", main = "LA Monthly Average Temperature ", cex.lab = 2, cex.axis=2, cex.main=1.5)
+
+#rent
+plot(rent.ts, xlab = "Time", ylab = "Monthly Rent CPI", main = "LA Rent CPI", cex.lab = 2, cex.axis=2, cex.main=1.5)
+
+par(mfrow = c(1,2))
+
+# Decomposing each time series
+plot(decompose(gdp.ts)) # linear rising trend and seasonality
+plot(decompose(ur.ts)) # declining trend till 2020 and seasonality
+plot(decompose(temp.ts)) # no clear trend with seasonality
+plot(decompose(rent.ts)) # linear rising trend with seasonality
+
+```
+
+# Checking if time series are stationary
+
+```{r}
+
+# adf (Augmented Dickey Fuller test)
+adf.test(crime.ts,alternative = "stationary",k=0)
+adf.test(gdp.ts,alternative = "stationary",k=0)
+adf.test(rent.ts,alternative = "stationary",k=0)
+adf.test(temp.ts,alternative = "stationary",k=0)
+adf.test(ur.ts,alternative = "stationary",k=0)
+
+# pp (Phillips-Perron Unit Root test)
+
+pp.test(crime.ts,alternative = "stationary")
+pp.test(gdp.ts,alternative = "stationary")
+pp.test(rent.ts,alternative = "stationary")
+pp.test(temp.ts,alternative = "stationary")
+pp.test(ur.ts,alternative = "stationary")
+
+
+# rent and ur and are not stationary and hence need to be transformed. Also seasonality is present in crime that needs to be adjusted.
+
+acf(rent.ts) # trend
+acf(ur.ts) # trend 
+
+par(mfrow = c(1,1))
+
+# Differencing rent and ur to remove trend
+newrent.ts <- diff(rent.ts,lag = 1)
+newur.ts <- diff(ur.ts,lag = 1)
+
+
+# Knit the regular and transformed variables
+var = ts.intersect(crime=crime.ts,
+                   gdp=gdp.ts,
+                   rent=newrent.ts,
+                   temp=temp.ts,
+                   ur=newur.ts) 
+
+```
+
+# Plotting scatterplot and correlations between variables
+
+```{r}
+
+# Examine scatterplot of data
+pairs(var, cex = 0.65, col = "darkblue")
+
+# Examine correlations of data 
+var.corr <- cor(as.matrix(var))
+var.corr.line <- var.corr["crime",]
+var.corr.line
+
+# Individual scatterplots
+qplot(var[,'gdp'],var[,'crime'],main = "Scatterplot for gdp vs crime")
+qplot(var[,'rent'],var[,'crime'],main = "Scatterplot for detrended rent vs crime")
+qplot(var[,'temp'],var[,'crime'],main = "Scatterplot for temp vs crime")
+qplot(var[,'ur'],var[,'crime'],main = "Scatterplot for detrended ur vs crime",xlim = c(-2,2))
+
+```
+
+The above scatterplots show that increased rent and temperature are showing some positive association with crime. For the UR it can be seen the correlation is weak due to presence of a outliers which when removed will eventually give a positive linear association. The gdp shows polynomial relation with crime.
+
+# 2020 is a pandemic year that might affect the correlation patterns between variables
+# What if we only look at the normal years? Is there a more significant relationship?
+
+# Creating train, test and validation set
+
+```{r}
+
+# Separating into train, test and validation
+var.train = window(var, end=c(2018,12)) # training data
+var.test = window(var, start=c(2019,1), end=c(2019,12)) # testing data
+var.valid = window(var, start=c(2020,1)) # 2020 validation data
+var.traintest = window(var, end=c(2019,12)) #training data till 2019
+
+```
+
+# Plotting scatterplot and correlations between variables again for training (normal years)
+
+```{r}
+
+# Examine scatter plots of training data
+pairs(var.train, cex = 0.65, col = "darkblue")
+
+# Examine correlations of training data
+var.corr <- cor(as.matrix(var.train))
+var.corr.line <- var.corr["crime",]
+var.corr.line
+
+# Individual scatterplots
+qplot(var.train[,'gdp'],var.train[,'crime'],main = "Scatterplot for gdp vs crime (Train)")
+qplot(var.train[,'rent'],var.train[,'crime'],main = "Scatterplot for detrended rent vs crime (Train)")
+qplot(var.train[,'temp'],var.train[,'crime'],main = "Scatterplot for temp vs crime (Train)")
+qplot(var.train[,'ur'],var.train[,'crime'],main = "Scatterplot for detrended ur vs crime (Train)",xlim = c(-1,1))
+
+```
+
+For normal years, stronger association between the external variables and crime is revealed although the pattern is similar to last time. Also, unemployment rate now has slightly positive correlation.
+
+# Examine Autocorrelations and cross-correlations between target and external variables
+
+```{r}
+
+# Checking for Autocorrelations for crime
+
+# crime
+Acf(var[,'crime'], lag.max = 100) # trend present
+Acf(diff(var[,'crime'],1), lag.max = 100) # Annual seasonality present
+Pacf(diff(var[,'crime'],1), lag.max = 100)
+
+# Checking for cross-correlations
+
+# gdp and crime
+Ccf(var[,'gdp'], var[,'crime'], lag.max = 30) # lag 12 observed
+Ccf(diff(var[,'gdp'],1), diff(var[,'crime'],1), lag.max = 100) # detrended variables
+Ccf(diff(var[,'gdp'],1), var[,'crime'], lag.max = 100) # crime vs detrended gdp
+# After removing trend from GDP and crime, there is still some patterns left
+Acf(diff(var[,'gdp'],1), lag.max = 100) # a bit seasonality left
+
+# rent and crime
+Ccf(var[,'rent'], var[,'crime'], lag.max = 5) # lag 2
+Ccf(diff(var[,'rent'],1), diff(var[,'crime'],1), lag.max = 100)
+Ccf(diff(var[,'rent'],1), var[,'crime'], lag.max = 100)
+Acf(var[,'rent'], lag.max = 100) # trend present
+Acf(diff(var[,'rent'],1), lag.max = 100)
+
+# temp and crime
+Ccf(var[,'temp'], var[,'crime'], lag.max = 24) # lag 12
+Ccf(diff(var[,'temp'],1), diff(var[,'crime'],1), lag.max = 15)
+Ccf(diff(var[,'temp'],1), var[,'crime'], lag.max = 15) # differenced temp
+Acf(var[,'temp'], lag.max = 100) 
+Acf(diff(var[,'temp'],1), lag.max = 100) # seasonality present
+
+# ur and crime
+Ccf(var[,'ur'], var[,'crime'], lag.max = 12) # No Significant correlation
+Ccf(diff(var[,'ur'],1), diff(var[,'crime'],1), lag.max = 100)
+Ccf(diff(var[,'ur'],1), var[,'crime'], lag.max = 12)
+Acf(var[,'ur'], lag.max = 100) 
+Acf(diff(var[,'ur'],1), lag.max = 100) 
+
+# Examining the lagged correlations
+lag1.plot(var[,'crime'],12) # high correlations at t-2 and seasonal (lag12,24)
+lag2.plot(var[,'gdp'], var[,'crime'], 12) # t-12
+lag2.plot(var[,'rent'], var[,'crime'], 8) # t-2
+lag2.plot(var[,'temp'], var[,'crime'], 12) # seasonal (lag12,24)
+
+```
+
+*** BUILDING REGRESSION MODELS ***
+
+# Using gdp only
+
+```{r}
+
+m1 = tslm(crime ~ gdp, data=var.train)
+summary(m1)$adj.r.squared
+
+m1.2019.pred=predict(m1, newdata=var.test)
+
+accuracy(m1$fitted.values, var.train[,'crime']) # training accuracy
+accuracy(m1.2019.pred, var.test[,'crime']) # testing accuracy
+
+```
+
+# Using rent only
+
+```{r}
+
+m2 = tslm(crime ~ rent, data=var.train)
+summary(m2)$adj.r.squared
+
+m2.2019.pred=predict(m2, newdata=var.test)
+
+accuracy(m2$fitted.values, var.train[,'crime']) # training accuracy
+accuracy(m2.2019.pred, var.test[,'crime']) # testing accuracy
+
+```
+
+# Using temp only
+
+```{r}
+
+m3 = tslm(crime ~ temp, data=var.train)
+summary(m3)$adj.r.squared
+
+m3.2019.pred=predict(m3, newdata=var.test)
+
+accuracy(m3$fitted.values, var.train[,'crime']) # training accuracy
+accuracy(m3.2019.pred, var.test[,'crime']) # testing accuracy
+
+```
+
+# Using ur only
+
+```{r}
+
+m4 = tslm(crime ~ ur, data=var.train)
+summary(m4)$adj.r.squared
+
+m4.2019.pred=predict(m4, newdata=var.test)
+
+accuracy(m4$fitted.values, var.train[,'crime']) # training accuracy
+accuracy(m4.2019.pred, var.test[,'crime']) # testing accuracy
+
+```
+
+# GDP+UR
+
+```{r}
+
+m5 = tslm(crime ~ ur+gdp, data=var.train)
+summary(m5)$adj.r.squared
+
+m5.2019.pred=predict(m5, newdata=var.test)
+
+accuracy(m5$fitted.values, var.train[,'crime']) # training accuracy
+accuracy(m5.2019.pred, var.test[,'crime']) # testing accuracy
+
+```
+
+# GDP+rent
+
+```{r}
+
+m6 = tslm(crime ~ rent+gdp, data=var.train)
+summary(m6)$adj.r.squared
+
+m6.2019.pred=predict(m6, newdata=var.test)
+
+accuracy(m6$fitted.values, var.train[,'crime']) # training accuracy
+accuracy(m6.2019.pred, var.test[,'crime']) # testing accuracy
+
+```
+
+# GDP+temp
+
+```{r}
+
+m7 = tslm(crime ~ temp+gdp, data=var.train)
+summary(m7)$adj.r.squared
+
+m7.2019.pred=predict(m7, newdata=var.test)
+
+accuracy(m7$fitted.values, var.train[,'crime']) # training accuracy
+accuracy(m7.2019.pred, var.test[,'crime']) # testing accuracy
+
+```
+
+# GDP+rent+UR
+
+```{r}
+
+m8 = tslm(crime ~ ur+rent+gdp, data=var.train)
+summary(m8)$adj.r.squared
+
+m8.2019.pred=predict(m8, newdata=var.test)
+
+accuracy(m8$fitted.values, var.train[,'crime']) # training accuracy
+accuracy(m8.2019.pred, var.test[,'crime']) # testing accuracy
+
+```
+
+model 7 & 8 are able to explain around 31% of the variation in crime. Now, we look for lead relationships based on the acf and ccf seen above and incorporate those in the model to see if it boosts the performance.
+
+*** BUILDING ADL MODELS ***
+
+```{r}
+
+# Adding lead variables based on correlations obtained from acf and ccf
+
+var.adl = ts.intersect(crime=crime.ts,
+                       gdp=gdp.ts,
+                       rent=newrent.ts,
+                       temp=temp.ts,
+                       ur=newur.ts,
+                       crime.lead2=stats::lag(crime.ts,-2),
+                       gdp.lead12=stats::lag(gdp.ts, -12),
+                       rent.lead2=stats::lag(newrent.ts, -2),
+                       temp.lead12=stats::lag(temp.ts, -12)
+                      )
+
+var.adl.train=window(var.adl, end=c(2018,12))
+var.adl.test=window(var.adl, start=c(2019, 1), end=c(2019,12))
+var.adl.valid=window(var.adl, start=c(2020,1))
+var.adl.traintest=window(var.adl, end=c(2019,12))
+
+```
+
+# trying trend, season and all variables in the adl (gdp had a cubic relationship with crime)
+
+```{r}
+
+# Fitting model on train (till 2018)
+adl.m1 = tslm(crime ~ trend + season + crime.lead2+gdp.lead12+I(gdp.lead12^2)+I(gdp.lead12^3)  +rent.lead2+temp.lead12,data=var.adl.train)
+summary(adl.m1)
+
+# Predicting values for test(2019) using train
+adl.m1.pred.test=round(forecast(adl.m1, newdata = data.frame(var.adl.test))$mean,2)
+
+# Predicting values for valid(2020) using train
+adl.m1.pred.valid.train=ts(as.numeric(round(forecast(adl.m1, newdata = data.frame(var.adl.valid))$mean,2)),start = c(2020,1),end = c(2020,8),frequency = 12)
+
+# Fitting model on traintest (till 2019)
+adl.m1.traintest=tslm(crime ~ trend + season + crime.lead2+gdp.lead12+I(gdp.lead12^2)+I(gdp.lead12^3) +rent.lead2+temp.lead12,data=var.adl.traintest)
+
+# Predicting values for valid(2020) using traintest
+adl.m1.pred.valid.traintest=round(forecast(adl.m1.traintest, newdata = data.frame(var.adl.valid))$mean,2)
+
+# Finding accuracies
+accuracy(round(adl.m1$fitted.values,2), var.adl.train[,'crime']) # training accuracy
+accuracy(adl.m1.pred.test, var.adl.test[,'crime']) # testing accuracy
+accuracy(adl.m1.pred.valid.train, var.adl.valid[,'crime']) #valid accuracy (train)
+accuracy(adl.m1.pred.valid.traintest, var.adl.valid[,'crime']) #valid accuracy (traintest)
+
+# plotting
+
+# train,test and valid (train)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using adl model1 train data till 2018") +
+  autolayer(round(adl.m1$fitted.values,2),series ="Fitted") +
+  autolayer(adl.m1.pred.test,series ="Test prediction")+
+  autolayer(adl.m1.pred.valid.train,series ="Valid prediction")
+
+# valid (traintest)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using adl model1 train data till 2019") +
+  autolayer(round(adl.m1.traintest$fitted.values,2),series ="Fitted") +
+  autolayer(adl.m1.pred.valid.traintest,series ="Valid prediction")
+
+```
+
+# removing trend due to high p value
+
+```{r}
+
+# Fitting model on train (till 2018)
+adl.m2 = tslm(crime ~ season + crime.lead2+gdp.lead12+I(gdp.lead12^2)+I(gdp.lead12^3) +rent.lead2+temp.lead12,data=var.adl.train)
+summary(adl.m2)
+
+# Predicting values for test(2019) using train
+adl.m2.pred.test=round(forecast(adl.m2, newdata = data.frame(var.adl.test))$mean,2)
+
+# Predicting values for valid(2020) using train
+adl.m2.pred.valid.train=ts(as.numeric(round(forecast(adl.m2, newdata = data.frame(var.adl.valid))$mean,2)),start = c(2020,1),end = c(2020,8),frequency = 12)
+
+# Fitting model on traintest (till 2019)
+adl.m2.traintest=tslm(crime ~ season + crime.lead2+gdp.lead12+I(gdp.lead12^2)+I(gdp.lead12^3) +rent.lead2+temp.lead12,data=var.adl.traintest)
+
+# Predicting values for valid(2020) using traintest
+adl.m2.pred.valid.traintest=round(forecast(adl.m2.traintest, newdata = data.frame(var.adl.valid))$mean,2)
+
+# Finding accuracies
+accuracy(round(adl.m2$fitted.values,2), var.adl.train[,'crime']) # training accuracy
+accuracy(adl.m2.pred.test, var.adl.test[,'crime']) # testing accuracy
+accuracy(adl.m2.pred.valid.train, var.adl.valid[,'crime']) #valid accuracy (train)
+accuracy(adl.m2.pred.valid.traintest, var.adl.valid[,'crime']) #valid accuracy (traintest)
+
+# plotting
+
+# train,test and valid (train)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using adl model2 train data till 2018") +
+  autolayer(round(adl.m2$fitted.values,2),series ="Fitted") +
+  autolayer(adl.m2.pred.test,series ="Test prediction")+
+  autolayer(adl.m2.pred.valid.train,series ="Valid prediction")
+
+# valid (traintest)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using adl model2 train data till 2019") +
+  autolayer(round(adl.m2.traintest$fitted.values,2),series ="Fitted") +
+  autolayer(adl.m2.pred.valid.traintest,series ="Valid prediction")
+
+```
+
+# removing temp.lead12 due to high p value
+
+```{r}
+
+# Fitting model on train (till 2018)
+adl.m3 = tslm(crime ~ season + crime.lead2+gdp.lead12+I(gdp.lead12^2)+I(gdp.lead12^3) +rent.lead2,data=var.adl.train)
+summary(adl.m3)
+
+# Predicting values for test(2019) using train
+adl.m3.pred.test=round(forecast(adl.m3, newdata = data.frame(var.adl.test))$mean,2)
+
+# Predicting values for valid(2020) using train
+adl.m3.pred.valid.train=ts(as.numeric(round(forecast(adl.m3, newdata = data.frame(var.adl.valid))$mean,2)),start = c(2020,1),end = c(2020,8),frequency = 12)
+
+# Fitting model on traintest (till 2019)
+adl.m3.traintest=tslm(crime ~ season + crime.lead2+gdp.lead12+I(gdp.lead12^2)+I(gdp.lead12^3) +rent.lead2,data=var.adl.traintest)
+
+# Predicting values for valid(2020) using traintest
+adl.m3.pred.valid.traintest=round(forecast(adl.m3.traintest, newdata = data.frame(var.adl.valid))$mean,2)
+
+# Finding accuracies
+accuracy(round(adl.m3$fitted.values,2), var.adl.train[,'crime']) # training accuracy
+accuracy(adl.m3.pred.test, var.adl.test[,'crime']) # testing accuracy
+accuracy(adl.m3.pred.valid.train, var.adl.valid[,'crime']) #valid accuracy (train)
+accuracy(adl.m3.pred.valid.traintest, var.adl.valid[,'crime']) #valid accuracy (traintest)
+
+# plotting
+
+# train,test and valid (train)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using adl model3 train data till 2018") +
+  autolayer(round(adl.m3$fitted.values,2),series ="Fitted") +
+  autolayer(adl.m3.pred.test,series ="Test prediction")+
+  autolayer(adl.m3.pred.valid.train,series ="Valid prediction")
+
+# valid (traintest)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using adl model3 train data till 2019") +
+  autolayer(round(adl.m3.traintest$fitted.values,2),series ="Fitted") +
+  autolayer(adl.m3.pred.valid.traintest,series ="Valid prediction")
+
+```
+
+# removing rent.lead2 due to high p value
+
+```{r}
+
+# Fitting model on train (till 2018)
+adl.m4 = tslm(crime ~ season + crime.lead2+gdp.lead12+I(gdp.lead12^2)+I(gdp.lead12^3),data=var.adl.train)
+summary(adl.m4)
+
+# Predicting values for test(2019) using train
+adl.m4.pred.test=round(forecast(adl.m4, newdata = data.frame(var.adl.test))$mean,2)
+
+# Predicting values for valid(2020) using train
+adl.m4.pred.valid.train=ts(as.numeric(round(forecast(adl.m4, newdata = data.frame(var.adl.valid))$mean,2)),start = c(2020,1),end = c(2020,8),frequency = 12)
+
+# Fitting model on traintest (till 2019)
+adl.m4.traintest=tslm(crime ~ season + crime.lead2+gdp.lead12+I(gdp.lead12^2) +I(gdp.lead12^3),data=var.adl.traintest)
+
+# Predicting values for valid(2020) using traintest
+adl.m4.pred.valid.traintest=round(forecast(adl.m4.traintest, newdata = data.frame(var.adl.valid))$mean,2)
+
+# Finding accuracies
+accuracy(round(adl.m4$fitted.values,2), var.adl.train[,'crime']) # training accuracy
+accuracy(adl.m4.pred.test, var.adl.test[,'crime']) # testing accuracy
+accuracy(adl.m4.pred.valid.train, var.adl.valid[,'crime']) #valid accuracy (train)
+accuracy(adl.m4.pred.valid.traintest, var.adl.valid[,'crime']) #valid accuracy (traintest)
+
+# plotting
+
+# train,test and valid (train)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using adl model4 train data till 2018") +
+  autolayer(round(adl.m4$fitted.values,2),series ="Fitted") +
+  autolayer(adl.m4.pred.test,series ="Test prediction")+
+  autolayer(adl.m4.pred.valid.train,series ="Valid prediction")
+
+# valid (traintest)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using adl model4 train data till 2019") +
+  autolayer(round(adl.m4.traintest$fitted.values,2),series ="Fitted") +
+  autolayer(adl.m4.pred.valid.traintest,series ="Valid prediction")
+
+```
+
+All the variables are significant now in the model and based on accuracies we stop removing more variables.
+
+
+*** BUILDING DECISION TREE MODELS***
+
+```{r}
+
+# Fitting decision tree model on train (till 2018)
+tree.model = tree(crime ~ crime.lead2+gdp.lead12+I(gdp.lead12^2)+I(gdp.lead12^3)                 +rent.lead2+temp.lead12,data=var.adl.train)
+summary(tree.model)
+
+# Plot the tree
+plot(tree.model)
+text(tree.model, pretty=0)
+
+# Prune the tree
+cv.tm = cv.tree(tree.model)
+plot(cv.tm$size, cv.tm$dev, type='b') # there is not much improvement after 3 splits.
+
+# can prune the tree to 3 branches
+prune.tree=prune.tree(tree.model, best=3)
+plot(prune.tree)
+text(prune.tree, pretty=0)
+
+## Fitting decision tree model on traintest (till 2019)
+tree.model.traintest=tree(crime ~ crime.lead2+gdp.lead12+I(gdp.lead12^2)+I(gdp.lead12^3)                 +rent.lead2+temp.lead12,data=var.adl.traintest)
+summary(tree.model.traintest)
+
+# plot the tree
+plot(tree.model.traintest)
+text(tree.model.traintest, pretty=0)
+
+# prune the tree
+cv.tm.traintest=cv.tree(tree.model.traintest)
+plot(cv.tm$size, cv.tm$dev, type='b')
+
+prune.tree.traintest=prune.tree(tree.model.traintest, best=4)
+plot(prune.tree.traintest)
+text(prune.tree.traintest, pretty=0)
+
+# Finding accuracies
+accuracy(round(predict(prune.tree, newdata=var.adl.train),2), var.adl.train[,'crime']) # training accurcy
+accuracy(round(predict(prune.tree, newdata=var.adl.test),2), var.adl.test[,'crime']) # testing accuracy
+accuracy(round(predict(prune.tree, newdata=var.adl.valid),2), var.adl.valid[,'crime']) # valid accuracy (train)
+accuracy(round(predict(prune.tree.traintest, newdata=var.adl.valid),2), var.adl.valid[,'crime']) # valid accuracy (traintest)
+
+
+# plotting
+
+# train,test and valid (train)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using tree model train data till 2018") +
+  autolayer(ts(round(predict(prune.tree, newdata=var.adl.train),2),end = c(2018,12),freq = 12),series ="Fitted") +
+  autolayer(ts(round(predict(prune.tree, newdata=var.adl.test),2),end = c(2019,12),freq = 12),series ="Test prediction")+
+  autolayer(ts(round(predict(prune.tree, newdata=var.adl.valid),2),end = c(2020,8),freq = 12),series ="Valid prediction")
+
+# valid (traintest)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using tree model train data till 2019") +
+  autolayer(ts(round(predict(prune.tree.traintest, newdata=var.adl.traintest),2),end = c(2019,12),freq = 12),series ="Fitted")+
+  autolayer(ts(round(predict(prune.tree.traintest, newdata=var.adl.valid),2),end = c(2020,8),freq = 12),series ="Valid prediction")
+  
+```
+
+Based on the all the above models that have been tried, adl.m4 has the best performance and thus this is our chosen model.
+
+
+*** CHECKING FOR STRUCTURAL BREAK ***
+
+There is a structural break expected starting around late Dec 2019 when pandemic was announced and lot of economic activities slowed down and sudden increased unemployment rate. To analyze this we are using training data till 2019 and applying our model on the 2020 data till August to see if the predicted vs. actual results are significantly different using a paired t-test.
+
+Hypothesis test
+
+H0 - Ud = 0 i.e. Crime predicted and crime actual are not different and crime rate was not impacted due to covid
+Ha - Ud != 0 Crime predicted and crime actual are different and crime rate was indeed impacted due to covid
+
+alpha here is chosen at 5%
+
+```{r}
+
+# Paired t-test
+
+t.test(adl.m4.pred.valid.traintest, var.adl.valid[,'crime'],paired = TRUE)
+
+```
+
+Given that p-value is 0.665 which is much higher than 0.05, we cannot reject the null hypothesis that crime rate has changed due to covid-19.
+
+
+--- PART C
+
+
+#######R SHINY APP#######
+
+```{r}
+# Reading Library
+library(shiny)
+library(shinydashboard)
+library(mapproj)
+library(maps)
+
+# Creating User Interface
+
+  ui <-    
+  
+           dashboardPage(
+                        dashboardHeader(title = "LA Crime Rate"),
+                        
+                        dashboardSidebar(
+                                        #sliderInput("bins","Number of breaks",1,100,50),
+                                        sidebarMenu(
+                                                    menuItem("Data",tabName = "timeseries",icon = icon("chart-line")),
+                                                    menuSubItem("Crime Data",tabName = "crime"),
+                                                    menuSubItem("External Variables",tabName = "external"),
+                                                    menuItem("Prediction Models",tabName = "model",icon = icon("sistrix")),
+                                                    menuSubItem("Linear",tabName = "linear"),
+                                                    menuSubItem("Quadratic",tabName = "quadratic"),
+                                                    menuSubItem("Cubic",tabName = "cubic"),
+                                                    menuSubItem("Moving Average",tabName = "ma"),
+                                                    menuSubItem("Exponential Smoothing",tabName = "exponential"),
+                                                    menuSubItem("SARIMA",tabName = "sarima"),
+                                                    menuSubItem("ADL",tabName = "adl"),
+                                                    menuSubItem("Decision Tree",tabName = "tree")
+                                                      
+                                                    ),
+                                        sliderInput("obs1", "Year Range:",min = 2010, max = 2020, value = c(2010,2020),sep = "")
+                                        
+                                       
+                                        
+                                        
+                                          
+                        ),
+                                        
+                         
+  
+          
+           dashboardBody( 
+                        tabItems(
+                                tabItem(tabName = "timeseries"),
+
+                                tabItem(tabName = "crime",
+                                        fluidRow(splitLayout(cellWidths = c("70%", "30%"), plotOutput("crime.ts"), plotOutput("map")))
+                                       
+                                        ),
+                                
+                                tabItem(tabName = "external",
+                                        fluidRow(splitLayout(cellWidths = c("50%", "50%"), plotOutput("gdp.ts"), plotOutput("ur.ts"))),
+                                        fluidRow(splitLayout(cellWidths = c("50%", "50%"), plotOutput("temp.ts"), plotOutput("rent.ts"))),
+                                      
+                                        ),
+                                        
+                                
+                                tabItem(tabName = "model"),
+                                
+                                tabItem(tabName = "linear",
+                                        fluidRow(splitLayout(cellWidths = c("70%", "60%"), plotOutput("linear"), infoBox("2020 PREDICTION ERROR(%)",value = tags$p(15.16, style = "font-size: 190%;"),icon = icon("bullseye"),color = "green")))
+                                        ),
+                                tabItem(tabName = "quadratic",
+                                        fluidRow(splitLayout(cellWidths = c("70%", "60%"), plotOutput("quadratic"), infoBox("2020 PREDICTION ERROR(%)",value = tags$p(19.71, style = "font-size: 190%;"),icon = icon("bullseye"),color = "green")))
+                                        ),
+                                tabItem(tabName = "cubic",
+                                        fluidRow(splitLayout(cellWidths = c("70%", "60%"), plotOutput("cubic"), infoBox("2020 PREDICTION ERROR(%)",value = tags$p(4.07, style = "font-size: 190%;"),icon = icon("bullseye"),color = "green")))
+                                        ),
+                                tabItem(tabName = "ma",
+                                        fluidRow(splitLayout(cellWidths = c("70%", "60%"), plotOutput("ma"), infoBox("2020 PREDICTION ERROR(%)",value = tags$p(7.84, style = "font-size: 190%;"),icon = icon("bullseye"),color = "green")))
+                                        ),
+                                tabItem(tabName = "exponential",
+                                        fluidRow(splitLayout(cellWidths = c("70%", "60%"), plotOutput("exponential"), infoBox("2020 PREDICTION ERROR(%)",value = tags$p(8.74, style = "font-size: 190%;"),icon = icon("bullseye"),color = "green")))
+                                        ),
+                                tabItem(tabName = "sarima",
+                                        fluidRow(splitLayout(cellWidths = c("70%", "60%"), plotOutput("sarima"), infoBox("2020 PREDICTION ERROR(%)",value = tags$p(8.24, style = "font-size: 190%;"),icon = icon("bullseye"),color = "green")))
+                                        ),
+                                tabItem(tabName = "adl",
+                                        fluidRow(splitLayout(cellWidths = c("70%", "60%"), plotOutput("adl"), infoBox("2020 PREDICTION ERROR(%)",value = tags$p(5.42, style = "font-size: 190%;"),icon = icon("bullseye"),color = "green")))
+                                        ),
+                                tabItem(tabName = "tree",
+                                        fluidRow(splitLayout(cellWidths = c("70%", "60%"), plotOutput("tree"), infoBox("2020 PREDICTION ERROR(%)",value = tags$p(12.49, style = "font-size: 190%;"),icon = icon("bullseye"),color = "green")))
+                                        )
+                                )
+    
+    
+                        )
+           
+           
+           
+  
+  
+  
+)
+
+
+
+# Creating Server
+  
+server <- function(input, output)
+{ 
+  
+  
+   output$linear <- renderPlot({ ts1 <- window(crime.ts,start = input$obs1[1],end=input$obs1[2])
+                                 plot(ts1, xlab = "Time", ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)-LINEAR MODEL")+
+                                 lines(lr_trend$fitted.values, col="red")+
+                                 lines(forecast(lr_trend, h=12)$mean,col = "green",lty = 2)
+                             })
+ 
+   output$quadratic <- renderPlot({ ts1 <- window(crime.ts,start = input$obs1[1],end=input$obs1[2])
+                                   plot(ts1, xlab = "Time", ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)-QUADRATIC MODEL")+
+                                   lines(quad_trend$fitted.values, col="red")+
+                                   lines(forecast(quad_trend, h=12)$mean,col = "green",lty = 2)
+                              })
+  
+   output$cubic <- renderPlot({ts1 <- window(crime.ts,start = input$obs1[1],end=input$obs1[2])
+                               plot(ts1, xlab = "Time", ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)-CUBIC MODEL")+
+                               lines(cubic_trend$fitted.values, col="red")+
+                               lines(forecast(cubic_trend, h=12)$mean,col = "green",lty = 2)
+                              })
+   
+   output$ma <- renderPlot({ts1 <- window(crime.ts,start = input$obs1[1],end=input$obs1[2])
+                           plot(ts1,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)-MOVING AVERAGE MODEL")+
+                           lines(ma.trailing.roll.1,series = "Fitted",col = "red")+
+                           lines(ma.trailing.pred.r.1,series = "Prediction",col = "green",lty = 2)
+                          })
+   
+   output$exponential <- renderPlot({ts1 <- window(crime.ts,start = input$obs1[1],end=input$obs1[2])
+                                     plot(ts1,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)-EXPONENTIAL SMOOTHING MODEL")+ 
+                                     lines(modelopt.1$fitted,series = "Fitted",col = "red")+
+                                     lines(forecast(modelopt.1, h = length(valid.ts))$mean,series = "Predicted",col = "green",lty = 2)+
+                                     lines(valid.ts,series = "Observed",col = "blue")
+                                    })
+   
+   output$sarima <- renderPlot({ts1 <- window(crime.ts,start = input$obs1[1],end=input$obs1[2])
+                               plot(ts1,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)-SARIMA MODEL")+
+                               lines(modelsarima.1.1$fitted,series = "Fitted",col = "red")+
+                               lines(forecast(modelsarima.1.1, h = length(valid.ts))$mean,series = "Prediction",col = "green",lty = 2)+
+                               lines(valid.ts,series = "Observed",col = "blue")
+                              })
+   
+   output$adl <- renderPlot({ts1 <- window(var.adl[,'crime'],start = input$obs1[1],end=input$obs1[2])
+                             plot(ts1,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)-ADL MODEL")+
+                             lines(round(adl.m4.traintest$fitted.values,2),series ="Fitted",col = "red") +
+                             lines(adl.m4.pred.valid.traintest,series ="Predicted",col = "green",lty = 2)
+                           })
+   
+   output$tree <- renderPlot({ts1 <- window(var.adl[,'crime'],start = input$obs1[1],end=input$obs1[2])
+                              plot(ts1,ylab = "Monthly Crime", main = "Monthly LA Crimes/Population (in 1000s)- TREE MODEL") +
+                              lines(ts(round(predict(prune.tree.traintest, newdata=var.adl.traintest),2),end = c(2019,12),freq = 12),series ="Fitted",col = "red")+
+                              lines(ts(round(predict(prune.tree.traintest, newdata=var.adl.valid),2),end = c(2020,8),freq = 12),series ="Predicted",col = "green",lty = 2)
+                            })
+   
+   
+   
+   output$map <- renderPlot({
+                               ggplot(map_data("state", region="california"), aes(x=long, y=lat)) +
+                               geom_polygon() +
+                               coord_map() +
+                               geom_point(aes(x=-118.41, y=34.11), color="green",size = 10)
+                           })
+   
+   output$crime.ts <- renderPlot({ ts1 <- window(crime.ts,start = input$obs1[1],end=input$obs1[2])
+                                   plot(ts1, xlab = "Time", ylab = "Monthly Crime", main = "LA Crimes")
+                                })
+   
+   output$gdp.ts <- renderPlot({ ts1 <- window(gdp.ts,start = input$obs1[1],end=input$obs1[2])
+                                 plot(ts1, xlab = "Time", ylab = "Monthly GDP", main = "LA GDP", cex.lab = 2, cex.axis=2, cex.main=1.5)
+                                })
+   
+   output$temp.ts <- renderPlot({ ts1 <- window(temp.ts,start = input$obs1[1],end=input$obs1[2])
+                                  plot(ts1, xlab = "Time", ylab = "Monthly Average Temperature", main = "LA Monthly Average Temperature ", cex.lab = 2, cex.axis=2, cex.main=1.5)
+                               })
+   
+   output$ur.ts <- renderPlot({ ts1 <- window(ur.ts,start = input$obs1[1],end=input$obs1[2])
+                                plot(ts1, xlab = "Time", ylab = "Monthly Unemployment Rate", main = "LA Unemployment Rate ", cex.lab = 2, cex.axis=2, cex.main=1.5)
+                             })
+   
+   output$rent.ts <- renderPlot({ ts1 <- window(rent.ts,start = input$obs1[1],end=input$obs1[2])
+                                  plot(ts1, xlab = "Time", ylab = "Monthly Rent CPI", main = "LA Rent CPI", cex.lab = 2, cex.axis=2, cex.main=1.5)
+                               })
+     
+                                   
+  
+}
+
+
+
+# Launching the Shiny Application
+shinyApp(ui,server)
+
+
+
+
+
+```
+
+
+# try if standarization helps in improving the performance
+
+```{r}
+
+# standardizing the data
+for(i in seq_len(ncol(var.adl))) var.adl[,i] <- scale(var.adl[,i])
+
+# creating train, test, valid and traintest again
+var.adl.train=window(var.adl, end=c(2018,12))
+var.adl.test=window(var.adl, start=c(2019, 1), end=c(2019,12))
+var.adl.valid=window(var.adl, start=c(2020,1))
+var.adl.traintest=window(var.adl, end=c(2019,12))
+
+adl.m4 = tslm(crime ~ season + crime.lead2+gdp.lead12+I(gdp.lead12^2)+I(gdp.lead12^3),data=var.adl.train)
+summary(adl.m4)
+
+# Predicting values for test(2019) using train
+adl.m4.pred.test=round(forecast(adl.m4, newdata = data.frame(var.adl.test))$mean,2)
+
+# Predicting values for valid(2020) using train
+adl.m4.pred.valid.train=ts(as.numeric(round(forecast(adl.m4, newdata = data.frame(var.adl.valid))$mean,2)),start = c(2020,1),end = c(2020,8),frequency = 12)
+
+# Fitting model on traintest (till 2019)
+adl.m4.traintest=tslm(crime ~ season + crime.lead2+gdp.lead12+I(gdp.lead12^2) +I(gdp.lead12^3),data=var.adl.traintest)
+
+# Predicting values for valid(2020) using traintest
+adl.m4.pred.valid.traintest=round(forecast(adl.m4.traintest, newdata = data.frame(var.adl.valid))$mean,2)
+
+# Finding accuracies
+accuracy(round(adl.m4$fitted.values,2), var.adl.train[,'crime']) # training accuracy
+accuracy(adl.m4.pred.test, var.adl.test[,'crime']) # testing accuracy
+accuracy(adl.m4.pred.valid.train, var.adl.valid[,'crime']) #valid accuracy (train)
+accuracy(adl.m4.pred.valid.traintest, var.adl.valid[,'crime']) #valid accuracy (traintest)
+
+# plotting
+
+# train,test and valid (train)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using adl model4 train data till 2018") +
+  autolayer(round(adl.m4$fitted.values,2),series ="Fitted") +
+  autolayer(adl.m4.pred.test,series ="Test prediction")+
+  autolayer(adl.m4.pred.valid.train,series ="Valid prediction")
+
+# valid (traintest)
+autoplot(var.adl[,'crime'],ylab = "crime",main = "Crime prediction using adl model4 train data till 2019") +
+  autolayer(round(adl.m4.traintest$fitted.values,2),series ="Fitted") +
+  autolayer(adl.m4.pred.valid.traintest,series ="Valid prediction")
+
+```
+
+The standardization does not help in improving the model performance.
+
+# Polynomial transformation of external variables
+
+```{r}
+
+gdp.ts.2=gdp.ts^2
+gdp.ts.3=gdp.ts^3
+gdp.ts.4=gdp.ts^4
+gdp.ts.log=log(gdp.ts)
+
+rent.ts.2=rent.ts^2
+rent.ts.3=rent.ts^3
+rent.ts.4=rent.ts^4
+rent.ts.log=log(rent.ts)
+ur.ts.2=ur.ts^2
+ur.ts.3=ur.ts^3
+ur.ts.4=ur.ts^4
+ur.ts.log=log(ur.ts)
+temp.ts.2=temp.ts^2
+temp.ts.3=temp.ts^3
+temp.ts.4=temp.ts^4
+temp.ts.log=log(temp.ts)
+
+var.poly=ts.intersect(crime=crime.ts,
+                      gdp=gdp.ts,
+                      gdp2=gdp.ts.2,
+                      gdp3=gdp.ts.3,
+                      gdp4=gdp.ts.4,
+                      gdplog=gdp.ts.log,
+                      rent=rent.ts,
+                      rent2=rent.ts.2,
+                      rent3=rent.ts.3,
+                      rent4=rent.ts.4,
+                      rentlog=rent.ts.log,
+                      ur=ur.ts,
+                      ur2=ur.ts.2,
+                      ur3=ur.ts.3,
+                      ur4=ur.ts.4,
+                      urlog=ur.ts.log,
+                      temp=temp.ts,
+                      temp2=temp.ts.2,
+                      temp3=temp.ts.3,
+                      temp4=temp.ts.4,
+                      templog=temp.ts.log)
+
+# get data before 2020
+var.poly.2019=window(var.poly, end=c(2019,12))
+
+# examine linear relationship after transformation
+var.poly.corr <- cor(as.matrix(var.poly))
+var.corr.line <- var.poly.corr["crime",]
+var.corr.line
+
+# just look at the linear relationship between GDP related variables and crime
+var.poly.gdp.2019=window(ts.intersect(crime=crime.ts,
+                      gdp=gdp.ts,
+                      gdp2=gdp.ts.2,
+                      gdp3=gdp.ts.3,
+                      gdp4=gdp.ts.4,
+                      gdplog=gdp.ts.log),
+                    end=c(2019,12))
+pairs(var.poly.gdp.2019, cex = 0.65, col = "darkblue")
+
+# just look at the linear relationship between UR related variables and crime
+var.poly.ur.2019=window(ts.intersect(crime=crime.ts,
+                                      ur=ur.ts,
+                                     ur2=ur.ts.2,
+                                     ur3=ur.ts.3,
+                                     ur4=ur.ts.4,
+                                     urlog=ur.ts.log),
+                         end=c(2019,12))
+pairs(var.poly.ur.2019, cex = 0.65, col = "darkblue")
+
+# get training data
+var.poly.2019=window(var.poly, end=c(2018,12))
+
+# try a new tree model with all original and transformed variables
+tree.poly=tree(var.poly.2019[,'crime']~var.poly.2019[,'gdp'] + var.poly.2019[,'gdp2'] + var.poly.2019[,'gdp3'] + var.poly.2019[,'gdp4'] + var.poly.2019[,'gdplog'] +
+                 var.poly.2019[,'rent'] + var.poly.2019[,'rent2'] + var.poly.2019[,'rent3'] + var.poly.2019[,'rent4'] + var.poly.2019[,'rentlog'] +
+                 var.poly.2019[,'ur'] + var.poly.2019[,'ur2'] + var.poly.2019[,'ur3'] + var.poly.2019[,'ur4'] + var.poly.2019[,'urlog'] +
+                 var.poly.2019[,'temp'] + var.poly.2019[,'temp2'] + var.poly.2019[,'temp3'] + var.poly.2019[,'temp4'] + var.poly.2019[,'templog']
+               )
+summary(tree.poly)
+
+plot(tree.poly)
+text(tree.poly, pretty=0)
+
+cv.tm=cv.tree(tree.poly)
+plot(cv.tm$size, cv.tm$dev, type='b')
+
+# there is not much improvement after 7 splits.
+
+# can prune the tree to 7 branches
+prune.tree=prune.tree(tree.poly, best=7)
+plot(prune.tree)
+text(prune.tree, pretty=0)
+
+# Seems that the tree still only picked up the linear variables... 
+# exactly the same tree as the last one
+
+
+# What if we add polynomial variables with linear variables? 
+# Will the linear variables still outperform?
+# This time we only look at GDP and temperature first
+var.poly.2=ts.intersect(crime=crime.ts,
+                      gdp=gdp.ts,
+                      gdp2=gdp.ts.2,
+                      gdp3=gdp.ts.3,
+                      gdp4=gdp.ts.4,
+                      gdplog=gdp.ts.log,
+                      gdp2l=gdp.ts+gdp.ts.2,
+                      gdp3l=gdp.ts+gdp.ts.3,
+                      gdp4l=gdp.ts+gdp.ts.4,
+                      temp=temp.ts,
+                      temp2=temp.ts.2,
+                      temp3=temp.ts.3,
+                      temp4=temp.ts.4,
+                      templog=temp.ts.log,
+                      temp2l=temp.ts+temp.ts.2,
+                      temp3l=temp.ts+temp.ts.3,
+                      temp4l=temp.ts+temp.ts.4)
+var.poly.2.2019=window(var.poly.2, end=c(2018,12))
+
+tree.poly.2=tree(var.poly.2.2019[,'crime']~var.poly.2.2019[,'gdp'] + var.poly.2.2019[,'gdp2'] + var.poly.2.2019[,'gdp3'] + var.poly.2.2019[,'gdp4'] + var.poly.2.2019[,'gdplog'] +
+                 var.poly.2.2019[,'gdp2l'] + var.poly.2.2019[,'gdp3l'] + var.poly.2.2019[,'gdp4l'] + 
+                 var.poly.2.2019[,'temp'] + var.poly.2.2019[,'temp2'] + var.poly.2.2019[,'temp3'] + var.poly.2.2019[,'temp4'] + var.poly.2.2019[,'templog'] +
+                var.poly.2.2019[,'temp2l'] + var.poly.2.2019[,'temp3l'] + var.poly.2.2019[,'temp4l']
+)
+summary(tree.poly.2)
+
+plot(tree.poly.2)
+text(tree.poly.2, pretty=0)
+
+# Still only used GDP and temperature...
+
+```
+
+# Trying boxcox transformation for the variables
+
+```{r}
+
+plot(var.traintest[,'crime'])
+crime.boxcox=BoxCox(var.traintest[,'crime'], lambda = 'auto')
+plot(crime.boxcox)
+
+plot(var.traintest[,'gdp'])
+gdp.boxcox=BoxCox(var.traintest[,'gdp'], lambda = 'auto')
+plot(gdp.boxcox)
+
+plot(var.traintest[,'ur'])
+ur.boxcox=BoxCox(var.traintest[,'ur'], lambda = 'auto')
+plot(ur.boxcox)
+
+plot(var.traintest[,'temp'])
+temp.boxcox=BoxCox(var.traintest[,'temp'], lambda = 'auto')
+plot(temp.boxcox)
+
+plot(var.traintest[,'rent'])
+rent.boxcox=BoxCox(var.traintest[,'rent'], lambda = 'auto')
+plot(rent.boxcox)
+
+
+# check cross correlation
+
+Ccf(gdp.boxcox, crime.boxcox, lag.max = 30) # original variables, lag 13
+Acf(diff(gdp.boxcox,1), lag.max = 100) # a bit seasonality left
+Acf(diff(crime.boxcox,1), lag.max = 100) # seasonality left
+
+Ccf(rent.boxcox, crime.boxcox, lag.max = 30) # original variables, lag 1
+Ccf(temp.boxcox, crime.boxcox, lag.max = 24) # original variables, lag 12
+Ccf(ur.boxcox, crime.boxcox, lag.max = 30) # original variables, lag 7
+
+var.adl.trans = ts.intersect(crime=crime.boxcox,
+                             crime.lag=stats::lag(crime.boxcox, -1),
+                             gdp.lag=stats::lag(gdp.boxcox, -10),
+                             ur.lag=stats::lag(ur.boxcox, -7),
+                             temp=temp.boxcox,
+                             rent.lag=stats::lag(rent.boxcox, -1))
+
+var.adl.trans.train=window(var.adl.trans, end=c(2018,12))
+var.adl.trans.test=window(var.adl.trans, start=c(2019,1), end=c(2019,12))
+var.adl.trans.traintest=window(var.adl.trans, end=c(2019,12))
+
+adl.model = lm(crime~crime.lag+gdp.lag+rent.lag+ur.lag, data=var.adl.trans.train)
+accuracy(adl.model$fitted.values, var.adl.trans.train[,'crime'])
+adl.model.pred=predict(adl.model, newdata=var.adl.trans.test)
+accuracy(adl.model.pred, var.adl.trans.test[,'crime'])
+autoplot(var.adl.trans.traintest[,'crime']) +
+  autolayer(ts(adl.model$fitted.values, end=c(2018,12), frequency = 12),series = "Fitted") +
+  autolayer(ts(adl.model.pred, end=c(2019,12), frequency = 12),series = "Predicted")
+
+```
+
+There was not major improvement seen from box cox transformation
+
+
+
+***END OF CODE***
